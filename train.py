@@ -146,9 +146,9 @@ class IMDBDataModule(pl.LightningDataModule):
 class BERTSentimentClassifier(pl.LightningModule):
     """PyTorch Lightning Module for BERT-based sentiment classification."""
 
-    def __init__(self, learning_rate=2e-5, num_labels=2):
+    def __init__(self, learning_rate=2e-5, num_labels=2, clearml_logger=None):
         super().__init__()
-        self.save_hyperparameters()
+        self.save_hyperparameters(ignore=["clearml_logger"])
 
         # Load pretrained BERT model
         self.bert = BertForSequenceClassification.from_pretrained(
@@ -156,6 +156,7 @@ class BERTSentimentClassifier(pl.LightningModule):
         )
 
         self.learning_rate = learning_rate
+        self.clearml_logger = clearml_logger  # Add ClearML logger
 
         # Store predictions for metrics
         self.training_step_outputs = []
@@ -178,8 +179,17 @@ class BERTSentimentClassifier(pl.LightningModule):
         logits = outputs.logits
         preds = torch.argmax(logits, dim=1)
 
-        # Log metrics
+        # Log metrics to PyTorch Lightning
         self.log("train_loss", loss, prog_bar=True)
+
+        # Log to ClearML
+        if self.clearml_logger:
+            self.clearml_logger.report_scalar(
+                title="Loss",
+                series="train",
+                value=loss.item(),
+                iteration=self.global_step,
+            )
 
         # Store for epoch end
         self.training_step_outputs.append(
@@ -200,6 +210,16 @@ class BERTSentimentClassifier(pl.LightningModule):
         accuracy = accuracy_score(all_labels.cpu().numpy(), all_preds.cpu().numpy())
 
         self.log("train_acc", accuracy, prog_bar=True)
+
+        # Log to ClearML
+        if self.clearml_logger:
+            self.clearml_logger.report_scalar(
+                title="Accuracy",
+                series="train",
+                value=accuracy,
+                iteration=self.current_epoch,
+            )
+
         self.training_step_outputs.clear()
 
     def validation_step(self, batch, batch_idx):
@@ -240,6 +260,35 @@ class BERTSentimentClassifier(pl.LightningModule):
 
         self.log("val_acc", accuracy, prog_bar=True)
         self.log("val_f1", f1, prog_bar=True)
+
+        # Log to ClearML
+        if self.clearml_logger:
+            # Calculate average validation loss
+            avg_val_loss = (
+                torch.stack([x["loss"] for x in self.validation_step_outputs])
+                .mean()
+                .item()
+            )
+
+            self.clearml_logger.report_scalar(
+                title="Loss",
+                series="validation",
+                value=avg_val_loss,
+                iteration=self.current_epoch,
+            )
+            self.clearml_logger.report_scalar(
+                title="Accuracy",
+                series="validation",
+                value=accuracy,
+                iteration=self.current_epoch,
+            )
+            self.clearml_logger.report_scalar(
+                title="F1 Score",
+                series="validation",
+                value=f1,
+                iteration=self.current_epoch,
+            )
+
         self.validation_step_outputs.clear()
 
     def configure_optimizers(self):
@@ -360,7 +409,11 @@ def main():
     )
 
     # Initialize model
-    model = BERTSentimentClassifier(learning_rate=LEARNING_RATE, num_labels=2)
+    model = BERTSentimentClassifier(
+        learning_rate=LEARNING_RATE,
+        num_labels=2,
+        clearml_logger=task.get_logger(),  # Pass ClearML logger
+    )
 
     # Callbacks
     checkpoint_callback = ModelCheckpoint(
