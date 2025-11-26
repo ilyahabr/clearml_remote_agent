@@ -370,9 +370,11 @@ def main():
     # Initialize ClearML Task for logging
     task = Task.init(
         project_name="BERT-Sentiment-Classification",
-        task_name="IMDB-Training-BERT-Base",
+        task_name="IMDB-Training-BERT-Base-Remote-Execution",
         task_type=Task.TaskTypes.training,
     )
+    task.execute_remotely(queue_name="deep_school")
+    
 
     # Set random seed for reproducibility
     pl.seed_everything(42)
@@ -458,6 +460,8 @@ def main():
         f"Device Name: {device_info['device_name']}\n"
         f"PyTorch Version: {torch.__version__}"
     )
+
+    
 
     # Initialize trainer with device-agnostic configuration
     trainer = pl.Trainer(
